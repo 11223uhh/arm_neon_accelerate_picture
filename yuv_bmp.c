@@ -16,6 +16,14 @@
     R=temp         +1.596*V+C
     G=temp-0.391*U -0.813*V+C
     B=temp+2.000*U   
+
+    temp=149*Y>>7
+
+    R=temp         +1.596*V+223
+    G=temp-0.391*U -0.813*V+135
+    B=temp+2.000*U         +277
+
+
     简化2.0
     temp=Y+Y>>3              ~1.125*Y
 
@@ -68,12 +76,19 @@ static void yuv_BGR( unsigned char *bgr, int width, int height, unsigned char *y
 
         uint16x8_t v_data_copy =vmovl_u8(vzip_u8(v_data, v_data).val[0]);
 
-        uint16x8_t temp_R=vmulq_u16(vmovl_u8(y_data), Y_R);
+        uint16x8_t temp_R =vmulq_u16(vmovl_u8(y_data), Y_R);
         temp_R=vrshrq_n_u16(temp_R,8);
 
+       
+
         R_vsum= vmulq_u16 (v_data_copy, V_R);
+        R_vsum1=vmulq_u16(vmovl_u8(y_data), Y_R);
+
         R_vsum=vrshrq_n_u16(R_vsum,7);
-        R_vsum=vqaddq_u16(R_vsum,temp_R);
+        R_vsum1=vrshrq_n_u16(R_vsum1,8);
+
+        R_vsum=vqaddq_u16(R_vsum,R_vsum1);
+
         R_vsum=vqsubq_u16(R_vsum,R_const);
     
         G_vsum=vmulq_u16(u_data_copy, U_G);
@@ -91,17 +106,19 @@ static void yuv_BGR( unsigned char *bgr, int width, int height, unsigned char *y
         G_vsum=vqsubq_u16(G_vsum,G_vsum1);
 
 
-        B_vsum=vmulq_u16(u_data_copy, U_B);
-        B_vsum=vrshrq_n_u16(B_vsum,6);//
+
+        B_vsum=vqaddq_u16(u_data_copy, u_data_copy);
+        
         B_vsum=vqaddq_u16(B_vsum,temp_R);
         B_vsum=vqsubq_u16(B_vsum,B_const);
+
 
 
         result.val[0]=vqmovn_u16(B_vsum);
         result.val[1]=vqmovn_u16(G_vsum);
         result.val[2]=vqmovn_u16(R_vsum);
 
-    
+
 
         vst3_u8(temp_d, result);
         temp_d+=24;
