@@ -174,13 +174,24 @@ _Bool InsUT_RGB_NV12(int32_t argc, char **argv)
 
     return 1;//读取文件成功
 }
+//  6次乘法 14次加减 6次右移
+/* 1 16个点                         第一个8点 5次乘法        7次加减         4次右移
+    temp=149*Y1>>7                   
+    R=temp         +1.596*V+223  
+    temp_r_v=1.596*V        
+    G=(temp-50*U-104*V)>>7+135 
+    temp_g_u=50*U
+    temp_g_v=104*V
+    B=temp+ U*2.018         +277
+    temp_b_u=U*2.018
 
-/*
-    temp=149*Y>>7                   4次乘法 3次位移 8为加减
-    R=temp         +1.596*V+223          
-    G=(temp-50*U-104*V)>>7+135  
-    B=temp+ U+U         +277
+    temp=149*Y2>>7                    第个8点   1次乘法 7次加减            2次右移
+    R=temp         +temp_r_v+223          
+    G=(temp-temp_g_u-temp_g_v)>>7+135  
+    B=temp+ U*temp_b_u         +277
 */
+
+
 static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *yuv_v)
 {
     uint16x8_t V_R=vdupq_n_u16(204);
@@ -228,16 +239,22 @@ static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *
             /*第一组八点 */
             uint16x8_t temp_R =vmulq_u16(vmovl_u8(y_data.val[0]), Y_R);
             uint16x8_t temp_R_NO_shift =temp_R;
+            uint16x8_t R_V_const_NO_shift ;
+            uint16x8_t B_U_const_NO_shift ;
+
             temp_R=vrshrq_n_u16(temp_R,7);
 
             R_vsum= vmulq_u16 (v_data_copy, V_R);
             R_vsum=vrshrq_n_u16(R_vsum,7);
-            R_vsum=vqaddq_u16(R_vsum,temp_R);
+            R_V_const_NO_shift=R_vsum;
+
+            R_vsum=vqaddq_u16(temp_R,R_V_const_NO_shift);
             R_vsum=vqsubq_u16(R_vsum,R_const);
     
             B_vsum= vmulq_u16 (u_data_copy, U_B);
             B_vsum=vrshrq_n_u16(B_vsum,6);
-            B_vsum=vqaddq_u16(B_vsum,temp_R);
+            B_U_const_NO_shift=B_vsum;
+            B_vsum=vqaddq_u16(B_U_const_NO_shift,temp_R);
             B_vsum=vqsubq_u16(B_vsum,B_const);
 //    G=(temp-50*U-104*V)>>7+135  
 
@@ -254,14 +271,11 @@ static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *
             temp_R_NO_shift =temp_R;
             temp_R=vrshrq_n_u16(temp_R,7);
 
-            R_vsum= vmulq_u16 (v_data_copy, V_R);
-            R_vsum=vrshrq_n_u16(R_vsum,7);
-            R_vsum=vqaddq_u16(R_vsum,temp_R);
+
+            R_vsum=vqaddq_u16(R_V_const_NO_shift,temp_R);
             R_vsum=vqsubq_u16(R_vsum,R_const);
     
-            B_vsum= vmulq_u16 (u_data_copy, U_B);
-            B_vsum=vrshrq_n_u16(B_vsum,6);
-            B_vsum=vqaddq_u16(B_vsum,temp_R);
+            B_vsum=vqaddq_u16(B_U_const_NO_shift,temp_R);
             B_vsum=vqsubq_u16(B_vsum,B_const);
 //    G=(temp-50*U-104*V)>>7+135  
 
