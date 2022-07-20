@@ -17,12 +17,18 @@
     G=temp-0.391*U -0.813*V+C
     B=temp+2.000*U   
 
-    temp=149*Y>>7
+    temp=149*Y>>7                   4次乘法 4次位移 8为加减
 
-    R=temp         +1.596*V+223
+    R=temp         +1.596*V+223          
     G=temp-0.391*U -0.813*V+135
-    B=temp+2.000*U         +277
+    B=temp+ U+U         +277
 
+    temp=149*Y>>7                   4次乘法 3次位移 8为加减
+
+    R=temp         +1.596*V+223          
+    G=(temp-50*U-104*V)>>7+135  
+    B=temp+ U+U         +277
+    
 
     简化2.0
     temp=Y+Y>>3              ~1.125*Y
@@ -32,15 +38,15 @@
 static void yuv_BGR( unsigned char *bgr, int width, int height, unsigned char *yuv_v)
 {
     uint16x8_t V_R=vdupq_n_u16(204);
-    uint16x8_t Y_R=vdupq_n_u16(298);
+    uint16x8_t Y_R=vdupq_n_u16(149);
 
-    uint16x8_t U_G=vdupq_n_u16(100);
-    uint16x8_t V_G=vdupq_n_u16(208);
+    uint16x8_t U_G=vdupq_n_u16(50);
+    uint16x8_t V_G=vdupq_n_u16(104);
 
     uint16x8_t U_B=vdupq_n_u16(129);
 
     uint16x8_t R_const=vdupq_n_u16(223);
-    uint16x8_t G_const=vdupq_n_u16(135);
+    uint16x8_t G_const=vdupq_n_u16(135*128);
     uint16x8_t B_const=vdupq_n_u16(277);
 
 
@@ -50,88 +56,58 @@ static void yuv_BGR( unsigned char *bgr, int width, int height, unsigned char *y
     unsigned char *ptr_v = temp_s+width*height+(width*height)/4;
     int pitch = width/8;
     uint16x8_t G_vsum ;
-        
     uint16x8_t G_vsum1 ;
     uint16x8_t G_vsum2 ;
 
     uint16x8_t R_vsum ;
-    uint16x8_t R_vsum1 ;
-
     uint16x8_t B_vsum ;
-    uint16x8_t B_vsum1 ;
 
     uint8x8x3_t result;
     for (int j = 0; j < height; ++j)
     {
         for (int i = 0; i < pitch; ++i)
         {
-        
-        uint8x8_t y_data = vld1_u8(temp_s);
+            uint8x8_t y_data = vld1_u8(temp_s);
+            uint8x8_t u_data = vld1_u8(ptr_u);
+            uint8x8_t v_data = vld1_u8(ptr_v);
+            uint16x8_t u_data_copy = vmovl_u8(vzip_u8(u_data, u_data).val[0]);
+            uint16x8_t v_data_copy =vmovl_u8(vzip_u8(v_data, v_data).val[0]);
 
+            uint16x8_t temp_R =vmulq_u16(vmovl_u8(y_data), Y_R);
+            uint16x8_t temp_R_NO_shift =temp_R;
 
-        uint8x8_t u_data = vld1_u8(ptr_u);
-        uint8x8_t v_data = vld1_u8(ptr_v);
+            temp_R=vrshrq_n_u16(temp_R,7);
 
-        uint16x8_t u_data_copy = vmovl_u8(vzip_u8(u_data, u_data).val[0]);
-
-        uint16x8_t v_data_copy =vmovl_u8(vzip_u8(v_data, v_data).val[0]);
-
-        uint16x8_t temp_R =vmulq_u16(vmovl_u8(y_data), Y_R);
-        temp_R=vrshrq_n_u16(temp_R,8);
-
-       
-
-        R_vsum= vmulq_u16 (v_data_copy, V_R);
-        R_vsum1=vmulq_u16(vmovl_u8(y_data), Y_R);
-
-        R_vsum=vrshrq_n_u16(R_vsum,7);
-        R_vsum1=vrshrq_n_u16(R_vsum1,8);
-
-        R_vsum=vqaddq_u16(R_vsum,R_vsum1);
-
-        R_vsum=vqsubq_u16(R_vsum,R_const);
+            R_vsum= vmulq_u16 (v_data_copy, V_R);
+            R_vsum=vrshrq_n_u16(R_vsum,7);
+            R_vsum=vqaddq_u16(R_vsum,temp_R);
+            R_vsum=vqsubq_u16(R_vsum,R_const);
     
-        G_vsum=vmulq_u16(u_data_copy, U_G);
-        G_vsum2=vmulq_u16(vmovl_u8(y_data), Y_R);
 
-        G_vsum=vrshrq_n_u16(G_vsum,8);
-        G_vsum2=vrshrq_n_u16(G_vsum2,8);
+            B_vsum=vqaddq_u16(u_data_copy, u_data_copy);
+            B_vsum=vqaddq_u16(B_vsum,temp_R);
+            B_vsum=vqsubq_u16(B_vsum,B_const);
+//    G=(temp-50*U-104*V)>>7+135  
 
-        G_vsum1=vmulq_u16(v_data_copy, V_G);
-        G_vsum1=vrshrq_n_u16(G_vsum1,8);
+            G_vsum=vqaddq_u16(temp_R_NO_shift,G_const);
+            G_vsum=vmlsq_u16(G_vsum,u_data_copy,U_G);
+            G_vsum=vmlsq_u16(G_vsum,v_data_copy,V_G);
+            G_vsum=vrshrq_n_u16(G_vsum,7);
+    
 
-        G_vsum2=vqaddq_u16(G_vsum2,G_const);
+            result.val[0]=vqmovn_u16(B_vsum);
+            result.val[1]=vqmovn_u16(G_vsum);
+            result.val[2]=vqmovn_u16(R_vsum);
 
-        G_vsum=vqsubq_u16(G_vsum2,G_vsum);
-        G_vsum=vqsubq_u16(G_vsum,G_vsum1);
-
-
-
-        B_vsum=vqaddq_u16(u_data_copy, u_data_copy);
-        
-        B_vsum=vqaddq_u16(B_vsum,temp_R);
-        B_vsum=vqsubq_u16(B_vsum,B_const);
-
-
-
-        result.val[0]=vqmovn_u16(B_vsum);
-        result.val[1]=vqmovn_u16(G_vsum);
-        result.val[2]=vqmovn_u16(R_vsum);
-
-
-
-        vst3_u8(temp_d, result);
-        temp_d+=24;
-        temp_s+=8;
-        ptr_u+=4;
-        ptr_v+=4;
+            vst3_u8(temp_d, result);
+            temp_d+=24;
+            temp_s+=8;
+            ptr_u+=4;
+            ptr_v+=4;
 
     }
-    if(j%2==0)
-    {
-        ptr_u=ptr_u-width/2;
-        ptr_v=ptr_v-width/2;
-    }
+        ptr_u=ptr_u-(1>>j%2)*(width/2);
+        ptr_v=ptr_v-(1>>j%2)*(width/2);
     
     }
 
