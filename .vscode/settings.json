@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "neon_2_sse.h": "c",
+        "yuv_bmp.h": "c",
+        "stdio.h": "c"
+    }
+}

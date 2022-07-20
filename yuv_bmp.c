@@ -140,7 +140,7 @@ _Bool InsUT_yuv420_RGB(int32_t argc, char **argv)
     fwrite(bgr_temp, sizeof(unsigned char), sizeof(unsigned char) * (width*height*3), file);
 
 	fclose(file);//关闭yuv文件
-    
+    /*
     printf("y=\n");
     for(int i=0;i<400;i++)
     {
@@ -166,5 +166,5 @@ _Bool InsUT_yuv420_RGB(int32_t argc, char **argv)
     {
         printf("count=%d, %B=%d,G=%d, R=%d\n",(i/3),bgr_temp[i],bgr_temp[i+1],bgr_temp[i+2]);
     }
-    
+    */
 }

@@ -3,6 +3,8 @@
 #include"stdint.h"
 #include "stdbool.h"
 _Bool InsUT_RGB_NV12(int32_t argc, char **argv);
+_Bool InsUT_NV12_RGB(int32_t argc, char **argv);
+
 struct bmp_data
 {
     int width;

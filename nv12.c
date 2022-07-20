@@ -176,4 +176,146 @@ _Bool InsUT_RGB_NV12(int32_t argc, char **argv)
 }
 
 
+static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *yuv_v)
+{
+    uint16x8_t V_R=vdupq_n_u16(204);
+    uint16x8_t Y_R=vdupq_n_u16(149);
 
+    uint16x8_t U_G=vdupq_n_u16(50);
+    uint16x8_t V_G=vdupq_n_u16(104);
+
+    uint16x8_t U_B=vdupq_n_u16(129);
+
+    uint16x8_t R_const=vdupq_n_u16(223);
+    uint16x8_t G_const=vdupq_n_u16(135*128);
+    uint16x8_t B_const=vdupq_n_u16(277);
+
+
+    unsigned char *temp_s = (unsigned char*)yuv_v;
+    unsigned char *temp_d = bgr;
+    unsigned char *ptr_u_v = temp_s+width*height;
+    int pitch = width/16;
+    uint16x8_t G_vsum ;
+
+    uint16x8_t R_vsum ;
+    uint16x8_t B_vsum ;
+
+    uint8x8_t R_result ;
+    uint8x8_t G_result ;
+    uint8x8_t B_result ;
+
+    uint8x8x2_t R_result__ ;
+    uint8x8x2_t G_result__ ;
+    uint8x8x2_t B_result__ ;
+
+    uint8x16x3_t result;
+
+    // Y1 Y2 Y3 Y4 Y5 Y6 Y7 Y8 Y9 Y10
+    // Y1 Y3 Y5 Y2 Y4 Y6
+    // U1 U2 U3 U1 U2 U3
+    // V1 V2 V3 V1 V2 V3
+    // R1 R3 R5 R2 R4 R6
+    // u1 v1 u2 v2 u3 v3 u4 v4  u1 u2 u3 u4 u1 u2 u3 u4
+    // u1 v1 u2 v2 u3 v3 u4 v4
+
+    for (int j = 0; j < height; ++j)
+    {
+        for (int i = 0; i < pitch; ++i)
+        {
+            uint8x8x2_t y_data = vld2_u8(temp_s);
+            uint8x8x2_t u_v_data = vld2_u8(ptr_u_v);
+
+            uint16x8_t u_data_copy =vmovl_u8(u_v_data.val[0]);
+            uint16x8_t v_data_copy =vmovl_u8(u_v_data.val[1]);
+
+            uint16x8_t temp_R =vmulq_u16(vmovl_u8(y_data.val[0]), Y_R);
+            uint16x8_t temp_R_NO_shift =temp_R;
+            temp_R=vrshrq_n_u16(temp_R,7);
+
+            R_vsum= vmulq_u16 (v_data_copy, V_R);
+            R_vsum=vrshrq_n_u16(R_vsum,7);
+            R_vsum=vqaddq_u16(R_vsum,temp_R);
+            R_vsum=vqsubq_u16(R_vsum,R_const);
+    
+            B_vsum=vqaddq_u16(u_data_copy, u_data_copy);
+            B_vsum=vqaddq_u16(B_vsum,temp_R);
+            B_vsum=vqsubq_u16(B_vsum,B_const);
+//    G=(temp-50*U-104*V)>>7+135  
+
+            G_vsum=vqaddq_u16(temp_R_NO_shift,G_const);
+            G_vsum=vmlsq_u16(G_vsum,u_data_copy,U_G);
+            G_vsum=vmlsq_u16(G_vsum,v_data_copy,V_G);
+            G_vsum=vrshrq_n_u16(G_vsum,7);
+
+            R_result=vqmovn_u16(R_vsum);
+            G_result=vqmovn_u16(G_vsum);
+            B_result=vqmovn_u16(B_vsum);
+
+            temp_R =vmulq_u16(vmovl_u8(y_data.val[1]), Y_R);
+            temp_R_NO_shift =temp_R;
+            temp_R=vrshrq_n_u16(temp_R,7);
+
+            R_vsum= vmulq_u16 (v_data_copy, V_R);
+            R_vsum=vrshrq_n_u16(R_vsum,7);
+            R_vsum=vqaddq_u16(R_vsum,temp_R);
+            R_vsum=vqsubq_u16(R_vsum,R_const);
+    
+            B_vsum=vqaddq_u16(u_data_copy, u_data_copy);
+            B_vsum=vqaddq_u16(B_vsum,temp_R);
+            B_vsum=vqsubq_u16(B_vsum,B_const);
+//    G=(temp-50*U-104*V)>>7+135  
+
+            G_vsum=vqaddq_u16(temp_R_NO_shift,G_const);
+            G_vsum=vmlsq_u16(G_vsum,u_data_copy,U_G);
+            G_vsum=vmlsq_u16(G_vsum,v_data_copy,V_G);
+            G_vsum=vrshrq_n_u16(G_vsum,7);
+
+            //R_result=vqmovn_u16(R_vsum);
+            //G_result=vqmovn_u16(G_vsum);
+            //B_result=vqmovn_u16(B_vsum);
+            R_result__=vzip_u8(R_result,vqmovn_u16(R_vsum));
+            G_result__=vzip_u8(G_result,vqmovn_u16(G_vsum));
+            B_result__=vzip_u8(B_result,vqmovn_u16(B_vsum));
+            result.val[0]=vcombine_u8(B_result__.val[0],B_result__.val[1]);
+            result.val[1]=vcombine_u8(G_result__.val[0],G_result__.val[1]);
+            result.val[2]=vcombine_u8(R_result__.val[0],R_result__.val[1]);
+
+            vst3q_u8(temp_d,result);
+            temp_d+=48;
+            temp_s+=16;
+            ptr_u_v+=16;
+
+        }
+        ptr_u_v=ptr_u_v-(1>>j%2)*(width);
+    
+    }
+} 
+
+_Bool InsUT_NV12_RGB(int32_t argc, char **argv) 
+{
+    FILE *file;
+    char *yuv_path=argv[1];
+    FILE *fp=fopen(yuv_path,"rb");//二进制读方式打开指定的图像文件
+    printf("\n path= %s\n",yuv_path);
+    unsigned char *bgr_temp;
+    unsigned char *yuv_ptr;
+    int width;
+    int height;
+    if(fp==0){printf("not find file\n");return 0;}
+    width = atoi(argv[2]);
+
+    height = atoi(argv[3]);
+
+    bgr_temp=(unsigned char *)malloc(width * height*3);
+    yuv_ptr=(unsigned char *)malloc(width*height+width*(height/2));
+
+    fread(yuv_ptr,1,width*height*1.5,fp);//将yuv写入yuv缓存
+
+    NV12_BGR( bgr_temp,  width,  height,yuv_ptr);
+
+    file = fopen("xxx.bmp", "wb");
+
+    fwrite(bgr_temp, sizeof(unsigned char), sizeof(unsigned char) * (width*height*3), file);
+
+	fclose(file);//关闭yuv文件
+}
