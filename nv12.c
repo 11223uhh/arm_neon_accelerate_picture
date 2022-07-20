@@ -175,7 +175,12 @@ _Bool InsUT_RGB_NV12(int32_t argc, char **argv)
     return 1;//读取文件成功
 }
 
-
+/*
+    temp=149*Y>>7                   4次乘法 3次位移 8为加减
+    R=temp         +1.596*V+223          
+    G=(temp-50*U-104*V)>>7+135  
+    B=temp+ U+U         +277
+*/
 static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *yuv_v)
 {
     uint16x8_t V_R=vdupq_n_u16(204);
@@ -210,24 +215,17 @@ static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *
 
     uint8x16x3_t result;
 
-    // Y1 Y2 Y3 Y4 Y5 Y6 Y7 Y8 Y9 Y10
-    // Y1 Y3 Y5 Y2 Y4 Y6
-    // U1 U2 U3 U1 U2 U3
-    // V1 V2 V3 V1 V2 V3
-    // R1 R3 R5 R2 R4 R6
-    // u1 v1 u2 v2 u3 v3 u4 v4  u1 u2 u3 u4 u1 u2 u3 u4
-    // u1 v1 u2 v2 u3 v3 u4 v4
-
     for (int j = 0; j < height; ++j)
     {
         for (int i = 0; i < pitch; ++i)
         {
+
             uint8x8x2_t y_data = vld2_u8(temp_s);
             uint8x8x2_t u_v_data = vld2_u8(ptr_u_v);
 
             uint16x8_t u_data_copy =vmovl_u8(u_v_data.val[0]);
             uint16x8_t v_data_copy =vmovl_u8(u_v_data.val[1]);
-
+            /*第一组八点 */
             uint16x8_t temp_R =vmulq_u16(vmovl_u8(y_data.val[0]), Y_R);
             uint16x8_t temp_R_NO_shift =temp_R;
             temp_R=vrshrq_n_u16(temp_R,7);
@@ -237,20 +235,21 @@ static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *
             R_vsum=vqaddq_u16(R_vsum,temp_R);
             R_vsum=vqsubq_u16(R_vsum,R_const);
     
-            B_vsum=vqaddq_u16(u_data_copy, u_data_copy);
+            B_vsum= vmulq_u16 (u_data_copy, U_B);
+            B_vsum=vrshrq_n_u16(B_vsum,6);
             B_vsum=vqaddq_u16(B_vsum,temp_R);
             B_vsum=vqsubq_u16(B_vsum,B_const);
 //    G=(temp-50*U-104*V)>>7+135  
 
             G_vsum=vqaddq_u16(temp_R_NO_shift,G_const);
-            G_vsum=vmlsq_u16(G_vsum,u_data_copy,U_G);
-            G_vsum=vmlsq_u16(G_vsum,v_data_copy,V_G);
+            G_vsum=vqsubq_u16(G_vsum,vmulq_u16 (u_data_copy, U_G));
+            G_vsum=vqsubq_u16(G_vsum,vmulq_u16 (v_data_copy, V_G));
             G_vsum=vrshrq_n_u16(G_vsum,7);
 
             R_result=vqmovn_u16(R_vsum);
             G_result=vqmovn_u16(G_vsum);
             B_result=vqmovn_u16(B_vsum);
-
+          /*第二组八点 */
             temp_R =vmulq_u16(vmovl_u8(y_data.val[1]), Y_R);
             temp_R_NO_shift =temp_R;
             temp_R=vrshrq_n_u16(temp_R,7);
@@ -260,14 +259,15 @@ static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *
             R_vsum=vqaddq_u16(R_vsum,temp_R);
             R_vsum=vqsubq_u16(R_vsum,R_const);
     
-            B_vsum=vqaddq_u16(u_data_copy, u_data_copy);
+            B_vsum= vmulq_u16 (u_data_copy, U_B);
+            B_vsum=vrshrq_n_u16(B_vsum,6);
             B_vsum=vqaddq_u16(B_vsum,temp_R);
             B_vsum=vqsubq_u16(B_vsum,B_const);
 //    G=(temp-50*U-104*V)>>7+135  
 
             G_vsum=vqaddq_u16(temp_R_NO_shift,G_const);
-            G_vsum=vmlsq_u16(G_vsum,u_data_copy,U_G);
-            G_vsum=vmlsq_u16(G_vsum,v_data_copy,V_G);
+            G_vsum=vqsubq_u16(G_vsum,vmulq_u16 (u_data_copy, U_G));
+            G_vsum=vqsubq_u16(G_vsum,vmulq_u16 (v_data_copy, V_G));
             G_vsum=vrshrq_n_u16(G_vsum,7);
 
             //R_result=vqmovn_u16(R_vsum);
@@ -291,6 +291,65 @@ static void NV12_BGR( unsigned char *bgr, int width, int height, unsigned char *
     }
 } 
 
+static void Yuv420sp2bgr(uint8_t* dst, uint8_t* srcY, uint8_t* srcU, int imgW, int imgH, int dstPitch, int srcPitch)
+{
+    const int Yuv2RgbBitShift = 7;
+    const int Yuv2RgbYFac = 149; // 1.164 * 128
+    const int Yuv2RgbYYY = 21;  // 0.164 * 128
+    const int Yuv2RgbV2R = 204; // 1.596 * 128
+    const int Yuv2RgbU2G = 50;  // 0.392 * 128
+    const int Yuv2RgbV2G = 104; // 0.812 * 128
+    const int Yuv2RgbU2B = 258; // 2.016 * 128
+    for (int i = 0; i < imgH - 1; i += 2) {
+        unsigned char* dstL0 = dst + i * dstPitch;
+        unsigned char* dstL1 = dstL0 + dstPitch;
+        unsigned char* srcY0 = srcY + i * srcPitch;
+        unsigned char* srcY1 = srcY0 + srcPitch;
+        unsigned char* srcUV = srcU + (i / 2) * srcPitch;
+        int j = 0;
+        uint8x8_t vSft = vdup_n_u8(1 << Yuv2RgbBitShift);
+        uint8x8_t vYYY = vdup_n_u8(Yuv2RgbYYY);
+        int16x8_t vV2R = vdupq_n_s16(Yuv2RgbV2R);
+        int16x8_t vU2G = vdupq_n_s16(Yuv2RgbU2G);
+        int16x8_t vV2G = vdupq_n_s16(Yuv2RgbV2G);
+        int16x8_t vU2B = vdupq_n_s16(Yuv2RgbU2B);
+        for (; j < imgW - 7; j += 8) {
+            uint8x8_t vY0 = vqsub_u8(vld1_u8(&srcY0[j]), vdup_n_u8(16));
+            uint8x8_t vY1 = vqsub_u8(vld1_u8(&srcY1[j]), vdup_n_u8(16));
+            uint8x8_t vU0 = vld1_u8(&srcUV[j]);
+            uint8x8x2_t vUV = vtrn_u8(vU0, vU0);
+            int16x8_t vUU = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vUV.val[0])), vdupq_n_s16(128));
+            int16x8_t vVV = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vUV.val[1])), vdupq_n_s16(128));
+            int16x8_t vTmp0 = vreinterpretq_s16_u16(vmull_u8(vY0, vYYY));
+            int16x8_t vTmp1 = vreinterpretq_s16_u16(vmull_u8(vY1, vYYY));
+            int16x8_t vAdd0 = vreinterpretq_s16_u16(vmull_u8(vY0, vSft));
+            int16x8_t vAdd1 = vreinterpretq_s16_u16(vmull_u8(vY1, vSft));
+
+            int16x8_t vTmpR = vmulq_s16(vV2R, vVV);
+            int16x8_t vTmpG = vaddq_s16(vmulq_s16(vU2G, vUU), vmulq_s16(vV2G, vVV));
+            int16x8_t vTmpB = vmulq_s16(vU2B, vUU);
+
+            uint8x8x3_t vRGB;
+            int16x8_t vRR = vmaxq_s16(vdupq_n_s16(1), vqaddq_s16(vAdd0, vqaddq_s16(vTmp0, vTmpR)));
+            int16x8_t vGG = vmaxq_s16(vdupq_n_s16(1), vqaddq_s16(vAdd0, vqsubq_s16(vTmp0, vTmpG)));
+            int16x8_t vBB = vmaxq_s16(vdupq_n_s16(1), vqaddq_s16(vAdd0, vqaddq_s16(vTmp0, vTmpB)));
+            vRGB.val[2] = vqmovn_u16(vrshrq_n_u16(vreinterpretq_u16_s16(vRR), 7));
+            vRGB.val[1] = vqmovn_u16(vrshrq_n_u16(vreinterpretq_u16_s16(vGG), 7));
+            vRGB.val[0] = vqmovn_u16(vrshrq_n_u16(vreinterpretq_u16_s16(vBB), 7));
+            vst3_u8(&dstL0[3 * j], vRGB);
+            
+            vRR = vmaxq_s16(vdupq_n_s16(1), vqaddq_s16(vAdd1, vqaddq_s16(vTmp1, vTmpR)));
+            vGG = vmaxq_s16(vdupq_n_s16(1), vqaddq_s16(vAdd1, vqsubq_s16(vTmp1, vTmpG)));
+            vBB = vmaxq_s16(vdupq_n_s16(1), vqaddq_s16(vAdd1, vqaddq_s16(vTmp1, vTmpB)));
+            vRGB.val[2] = vqmovn_u16(vrshrq_n_u16(vreinterpretq_u16_s16(vRR), 7));
+            vRGB.val[1] = vqmovn_u16(vrshrq_n_u16(vreinterpretq_u16_s16(vGG), 7));
+            vRGB.val[0] = vqmovn_u16(vrshrq_n_u16(vreinterpretq_u16_s16(vBB), 7));
+            vst3_u8(&dstL1[3 * j], vRGB);
+        }
+    }
+    return;
+}
+
 _Bool InsUT_NV12_RGB(int32_t argc, char **argv) 
 {
     FILE *file;
@@ -312,7 +371,35 @@ _Bool InsUT_NV12_RGB(int32_t argc, char **argv)
     fread(yuv_ptr,1,width*height*1.5,fp);//将yuv写入yuv缓存
 
     NV12_BGR( bgr_temp,  width,  height,yuv_ptr);
+    //Yuv420sp2bgr(bgr_temp, yuv_ptr, yuv_ptr+width*height, width, height, 1920*3, 1920);
+    file = fopen("xxx.bmp", "wb");
 
+    fwrite(bgr_temp, sizeof(unsigned char), sizeof(unsigned char) * (width*height*3), file);
+
+	fclose(file);//关闭yuv文件
+}
+_Bool InsUT_NV12_RGB_my(int32_t argc, char **argv) 
+{
+    FILE *file;
+    char *yuv_path=argv[1];
+    FILE *fp=fopen(yuv_path,"rb");//二进制读方式打开指定的图像文件
+    printf("\n path= %s\n",yuv_path);
+    unsigned char *bgr_temp;
+    unsigned char *yuv_ptr;
+    int width;
+    int height;
+    if(fp==0){printf("not find file\n");return 0;}
+    width = atoi(argv[2]);
+
+    height = atoi(argv[3]);
+
+    bgr_temp=(unsigned char *)malloc(width * height*3);
+    yuv_ptr=(unsigned char *)malloc(width*height+width*(height/2));
+
+    fread(yuv_ptr,1,width*height*1.5,fp);//将yuv写入yuv缓存
+
+    NV12_BGR( bgr_temp,  width,  height,yuv_ptr);
+    //Yuv420sp2bgr(bgr_temp, yuv_ptr, yuv_ptr+width*height, width, height, 1920*3, 1920);
     file = fopen("xxx.bmp", "wb");
 
     fwrite(bgr_temp, sizeof(unsigned char), sizeof(unsigned char) * (width*height*3), file);
