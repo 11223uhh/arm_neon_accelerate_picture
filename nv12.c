@@ -7,6 +7,7 @@
 
 static void NV_BGR_yuv_uv(int *coef_q8_1,int *coef_q8_2,const unsigned char *bgr, int width, int height, unsigned char *yuv_v) 
 {
+	int a=2;
     unsigned char *temp_s = (unsigned char*)bgr;
     unsigned char *temp_d = yuv_v;
     int16x8_t vwb_U = vdupq_n_s16(coef_q8_1[0]);
